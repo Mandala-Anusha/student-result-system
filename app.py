@@ -77,7 +77,7 @@ def add_student():
 
         conn = get_db()
         conn.execute('''
-            INSERT INTO students 
+            INSERT INTO students
             (name, roll_number, mathematics, electronic_devices, signals_systems, total, percentage, grade, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (name, roll, mathematics, electronic_devices, signals_systems, total, percentage, grade, status))
@@ -90,6 +90,43 @@ def add_student():
             "percentage": percentage,
             "status": status
         }), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/students/<int:id>', methods=['PUT'])
+def update_student(id):
+    try:
+        data = request.get_json()
+        mathematics = int(data['mathematics'])
+        electronic_devices = int(data['electronic_devices'])
+        signals_systems = int(data['signals_systems'])
+
+        for mark in [mathematics, electronic_devices, signals_systems]:
+            if mark < 0 or mark > 100:
+                return jsonify({"error": "Marks must be between 0 and 100"}), 400
+
+        total = mathematics + electronic_devices + signals_systems
+        percentage = round(total / 3, 2)
+        grade = calculate_grade(percentage)
+        status = 'Pass' if percentage >= 35 else 'Fail'
+
+        conn = get_db()
+        conn.execute('''
+            UPDATE students
+            SET mathematics=?, electronic_devices=?, signals_systems=?,
+                total=?, percentage=?, grade=?, status=?
+            WHERE id=?
+        ''', (mathematics, electronic_devices, signals_systems, total, percentage, grade, status, id))
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "message": "Student updated successfully",
+            "grade": grade,
+            "percentage": percentage,
+            "status": status
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -112,6 +149,37 @@ def search_student():
     ).fetchall()
     conn.close()
     return jsonify([dict(s) for s in students])
+
+@app.route('/export', methods=['GET'])
+def export_csv():
+    conn = get_db()
+    students = conn.execute('SELECT * FROM students ORDER BY id DESC').fetchall()
+    conn.close()
+
+    csv = 'ID,Name,Roll Number,Mathematics,Electronic Devices,Signals Systems,Total,Percentage,Grade,Status\n'
+    for s in students:
+        csv += f"{s['id']},{s['name']},{s['roll_number']},{s['mathematics']},{s['electronic_devices']},{s['signals_systems']},{s['total']},{s['percentage']},{s['grade']},{s['status']}\n"
+
+    from flask import Response
+    return Response(
+        csv,
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=student_results.csv'}
+    )
+
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    conn = get_db()
+    students = conn.execute('SELECT grade FROM students').fetchall()
+    conn.close()
+
+    grades = {'A+': 0, 'A': 0, 'B': 0, 'C': 0, 'D': 0, 'F': 0}
+    for s in students:
+        grade = s['grade']
+        if grade in grades:
+            grades[grade] += 1
+
+    return jsonify(grades)
 
 if __name__ == '__main__':
     init_db()
